@@ -1,6 +1,6 @@
 function [u_applied, delta_u_applied] = MPC_Linear(x0, u_prev, y_ref, N, Ts, L, Q, R, u_min, u_max, du_min, du_max, C)
 % MPC LINEARE
-n_x = 4; n_u = 2; n_y = size(C, 1);
+n_x = size(x0,1); n_u = size(u_prev,1); n_y = size(C, 1);
 
 % PUNTO DI LINEARIZZAZIONE
 x_lin = x0;

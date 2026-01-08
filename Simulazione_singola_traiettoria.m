@@ -65,7 +65,7 @@ for t = 1:2500
         dx_t = y_ref(1) - x_current(1);
         dy_t = y_ref(2) - x_current(2);
 
-        % Calcolo Angolo di Puntamento
+        %% Calcolo Angolo di Puntamento
         % Se siamo lontani (>1m), aggiorno l'angolo verso il target
         % Se siamo vicini (<1m), CONGELIAMO l'ultimo angolo buono
         if dist > 1.0
@@ -90,7 +90,7 @@ for t = 1:2500
         curr_u_max = [ v_target;  0.3];
         curr_u_min = [-v_target; -0.3];
 
-        % Angle Wrapping
+        %% Angle Wrapping
         % Calcola l'errore minimo (-pi, +pi) e aggiungilo allo stato attuale
         % per ingannare l'MPC e non fargli fare giri di 360 gradi.
         delta_theta = x_current(3) - desired_theta;

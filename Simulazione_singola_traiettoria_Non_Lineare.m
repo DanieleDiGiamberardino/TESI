@@ -48,12 +48,13 @@ for t = 1:2500
     % Distanza Euclidea dal Target
     dist = norm(x_current(1:2) - y_ref(1:2));
 
-    % DEADZONE
+    %% DEADZONE
     if dist < TOLERANCE_POS
         % Siamo arrivati: Spegni i motori
         u_opt = [0; 0];
 
-        % Check se siamo fermi da un po' per uscire dal loop
+        % Check se siamo fermi da un po' e sono entro una distanza STOP_DIST per uscire dal loop(cosi mi salvo
+        % gli ultimi stati)
         if t > 10 && norm(u_prev) < 0.05 && dist < STOP_DIST
             fprintf('TARGET RAGGIUNTO (Step %d)\n', t);
             break;
@@ -65,7 +66,7 @@ for t = 1:2500
         dx_t = y_ref(1) - x_current(1);
         dy_t = y_ref(2) - x_current(2);
 
-        % Calcolo Angolo di Puntamento
+        %% Calcolo Angolo di Puntamento
         % Se siamo lontani (>1m), aggiorno l'angolo verso il target
         % Se siamo vicini (<1m), CONGELIAMO l'ultimo angolo buono
         if dist > 1.0
@@ -83,15 +84,15 @@ for t = 1:2500
             v_target = 2.0;
         else
             % Rampa lineare da 2.0 a 0.3 m/s
-            v_target = 0.3 + (2.0 - 0.3) * (dist / RAMP_DIST);
+            v_target = 0.2 + (2.0 - 0.2) * (dist / RAMP_DIST);
         end
 
         % Vincoli dinamici di velocità (Valore assoluto u)
-        curr_u_max = [ v_target;  0.3];
-        curr_u_min = [-v_target; -0.3];
+        curr_u_max = [ v_target;  0.2];
+        curr_u_min = [-v_target; -0.2];
 
-        % Angle Wrapping
-        % Calcola l'errore minimo (-pi, +pi) e aggiungilo allo stato attuale
+        %% Angle Wrapping
+        % Calcola l'errore minimo (-pi, +pi) e lo aggiungo allo stato attuale
         % per ingannare l'MPC e non fargli fare giri di 360 gradi.
         delta_theta = x_current(3) - desired_theta;
         delta_theta_norm = atan2(sin(delta_theta), cos(delta_theta));
@@ -112,7 +113,7 @@ for t = 1:2500
         end
     end
 
-    %  AGGIORNAMENTO FISICO (Modello discreto non lineare)
+    % AGGIORNAMENTO FISICO (Modello discreto non lineare)
     dxdt = Car_Like_Model(x_current, u_opt, L);
     x_next = x_current + dxdt * Ts;
 
@@ -174,5 +175,5 @@ text(start_x, start_y + 2, 'FRONT', 'Color', 'm', 'FontWeight', 'bold');
 draw_car(history_x(end,1), history_x(end,2), history_x(end,3), [0.4 0.7 1.0]);
 text(history_x(end,1), history_x(end,2)+1, 'END', 'FontWeight', 'bold', 'Color', 'b');
 
-title(['Pure Pursuit Trajectory | Err: ' num2str(final_err, '%.3f') 'm']);
+title(['Traiettoria Target Statico | Err: ' num2str(final_err, '%.3f') 'm']);
 xlabel('X [m]'); ylabel('Y [m]');
