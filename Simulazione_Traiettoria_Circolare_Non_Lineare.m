@@ -10,7 +10,7 @@ start_x = 20; start_y = -5; start_angle = pi;
 x_current = [start_x; start_y; start_angle; 0];
 
 %% PARAMETRI
-L = 1.2; Ts = 0.1; N = 30; % distanza tra le ruote, tempo campionamento, N orizzonti 
+L = 1.2; Ts = 0.5; N = 6; % distanza tra le ruote, tempo campionamento, N orizzonti 
 C = eye(4);
 
 % Matrici di costo 
@@ -36,9 +36,11 @@ prev_theta_car = atan2(start_y, start_x);
 
 for t = 1:1500 
 
-    theta_car = atan2(x_current(2), x_current(1)); % orinetamento attuale del veicolo
+    theta_car = atan2(x_current(2), x_current(1)); % orinetamento attuale del veicolo range (-pi,pi)
     
     %% Gestione Wrapping Giri
+    %(uso queste tecnica per evitare errori elevati tra theta_car e
+    %theta_taget dovuti al range dell atan2)
     if (theta_car - prev_theta_car) < -5 % se la differenza tra Nuovo - Vecchio è <-5 allora o > 5 allora ho avuto in intera rotazione altrimenti 
         %normale variazione dell'angolo
         loops = loops + 1;
@@ -53,7 +55,7 @@ for t = 1:1500
     
     %% COSTRUZIONE ORIZZONTE
     % Calcoliamo N punti futuri sul cerchio
-    Ref_Horizon = zeros(4, N);
+    Ref_Ori = zeros(4, N);
     
     % Distanza iniziale 
     look_ahead_angle = 2.0 / R_circle; % Guardiamo 2 metri avanti(è la distanza del primo punto che vogliamo raggiungere rispetto a dove mi trovo)
@@ -74,29 +76,30 @@ for t = 1:1500
         ref_theta = ang_k + pi/2;
         
         % Definisco i valori del k-esimo punto che voglio raggiungere 
-        Ref_Horizon(1,k) = ref_x;
-        Ref_Horizon(2,k) = ref_y;
-        Ref_Horizon(3,k) = ref_theta;
-        Ref_Horizon(4,k) = 0; % Sterzo 
+        Ref_Ori(1,k) = ref_x;
+        Ref_Ori(2,k) = ref_y;
+        Ref_Ori(3,k) = ref_theta;
+        Ref_Ori(4,k) = atan(L/R_circle);% Sterzo 
     end
     %% Fix Start ANGOLO
-    delta = x_current(3) - Ref_Horizon(3,1);
+    delta = x_current(3) - Ref_Ori(3,1);
     delta_norm = atan2(sin(delta), cos(delta));
     x_mpc_input = x_current;
-    x_mpc_input(3) = Ref_Horizon(3,1) + delta_norm; % ho creato uno stato fittizio x_mpc_input in modo tale che passo al MPC 
+    x_mpc_input(3) = Ref_Ori(3,1) + delta_norm; % ho creato uno stato fittizio x_mpc_input in modo tale che passo al MPC 
     % Ref + errore_piccolo questo "inganna" l'MPC facendogli vedere l'auto vicinissima al riferimento. 
     
     %% Fix Orizzonte ANGOLO -> facciamo la stessa cosa di sopra ma su tutto
-    % l'orrizonte della finestra 
+    % l'orrizonte della finestra sul riferimento stesso problema 
+    %Se la differenza è il salto tra 179 e -179 (cioè 358), questa formula restituisce 2.
     base_angle = x_mpc_input(3);
     for k = 1:N
-         diff = Ref_Horizon(3,k) - base_angle;
+         diff = Ref_Ori(3,k) - base_angle;
          diff = atan2(sin(diff), cos(diff));
-         Ref_Horizon(3,k) = base_angle + diff;
-         base_angle = Ref_Horizon(3,k);
+         Ref_Ori(3,k) = base_angle + diff;
+         base_angle = Ref_Ori(3,k);
     end
     
-    y_ref_long = reshape(Ref_Horizon, [4*N, 1]); % sono i vari punti che mi sono costruito un vettore colonna
+    y_ref_long = reshape(Ref_Ori, [4*N, 1]); % sono i vari punti che mi sono costruito un vettore colonna
     
     try
         [u_opt, ~] = MPC_Linear(x_mpc_input, u_prev, y_ref_long, N, Ts, L, Q, R, u_min, u_max, du_min, du_max, C);
@@ -104,7 +107,7 @@ for t = 1:1500
         u_opt = u_prev;
     end
     
-    % Fisica
+    %% Fisica non lineare 
     dxdt = Car_Like_Model(x_current, u_opt, L);
     x_current = x_current + dxdt * Ts;
     u_prev = u_opt;
