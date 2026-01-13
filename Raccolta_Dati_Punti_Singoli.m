@@ -11,7 +11,9 @@ OUTPUT_FILE = 'Dataset_Recovery_SinglePoints.mat';
 % VINCOLI E PESI
 u_min = [-2.0; -0.3]; u_max = [ 2.0;  0.3]; % Sterzo max 0.3
 du_min = [-0.5; -0.1]; du_max = [ 0.5;  0.1];
-C = eye(4); Q = diag([30, 30, 1, 0]); R = diag([10, 50]);
+C = eye(4);
+Q = diag([5, 5, 50, 0]);   % Theta (50) pesa 10 volte la Posizione (5)
+R = diag([1, 100]);        % Sterzare (100) costa tantissimo -> Guida dolce
 RAMP_DIST = 3.0;
 
 %% INIZIALIZZAZIONE

@@ -1,7 +1,6 @@
-%% RACCOLTA DATI MPC - AUGMENTED (Data Augmentation)
+%% RACCOLTA DATI MPC - AUGMENTED (Data Augmentation) - FIXED
 % Questo script genera un dataset arricchito per l'addestramento.
-% Per ogni stato fisico visitato, simula diverse condizioni iniziali dei motori (u_prev)
-% per insegnare alla rete a gestire qualsiasi situazione pregressa.
+% INCLUDE FIX: Generazione dinamica di u_prev basata su v_target per garantire fattibilità.
 
 clear all; clc; close all;
 
@@ -11,35 +10,26 @@ Ts = 0.1;
 N = 40;          
 
 % Dimensione totale del dataset desiderata
-TOTAL_SAMPLES = 50000; % Aumentato perché ne generiamo tanti per ogni step
+TOTAL_SAMPLES = 50000; 
 OUTPUT_FILE = 'Dataset_Augmented_Final.mat';
 
-%% 2. PARAMETRI AUGMENTATION (Impostazioni del Prof)
+%% 2. PARAMETRI AUGMENTATION
 % Quante varianti di u_prev generare per ogni singolo stato fisico?
 N_aug = 7; 
 
-% LIMITI U_PREV (Guardando i tuoi grafici delle u)
-% Velocità (v): oscillava tra circa 0 e 2.0 (o -2 e 2 se consideri tutto)
-v_aug_min = -0.5; 
-v_aug_max =  3.0;
-
-% Sterzo (w): oscillava tra -0.3 e 0.3
+% Limiti Assoluti per lo sterzo (w)
 w_aug_min = -0.2;
 w_aug_max =  0.2;
 
-%% 3. PARAMETRI CONTROLLORE
-% Vincoli sulla u assoluta
-u_min = [-0.5; -0.6];
-u_max = [ 3;  0.6]; 
-
+%% PARAMETRI CONTROLLORE
 % Vincoli sull'accelerazione/decelerazione
 du_min = [-1.0; -0.2];
 du_max = [ 1.0;  0.2];
 
 % Pesi MPC
 C = eye(4);
-Q = diag([30, 30, 9, 0]); 
-R = diag([7, 50]);       
+Q = diag([5, 5, 50, 0]);   % Theta (50) pesa 10 volte la Posizione (5)
+R = diag([1, 100]);        % Sterzare (100) costa tantissimo -> Guida dolce      
 
 % Soglie Planner
 RAMP_DIST     = 3.0;  
@@ -47,11 +37,10 @@ STOP_DIST     = 0.30;
 TOLERANCE_POS = 0.20; 
 
 %% INIZIALIZZAZIONE
-% Stimiamo la dimensione per pre-allocare (velocizza)
 X_dataset = zeros(TOTAL_SAMPLES, 6); 
 Y_dataset = zeros(TOTAL_SAMPLES, 2);
 
-fprintf('Avvio Raccolta Dati AUGMENTED...\n');
+fprintf('Avvio Raccolta Dati AUGMENTED (con FIX Dinamico)...\n');
 fprintf('Generazione di %d varianti per ogni passo fisico.\n', N_aug);
 
 counter = 0;
@@ -98,15 +87,18 @@ while counter < TOTAL_SAMPLES
             desired_theta = final_approach_angle;
         end
         
+        % Calcolo velocità target in base alla distanza (Rampa)
         if dist > RAMP_DIST
             v_target = 2.0;
         else
             v_target = 0.3 + (2.0 - 0.3) * (dist / RAMP_DIST);
         end
         
+        % Vincoli dinamici per l'MPC attuale
         curr_u_max = [ v_target;  0.3];
         curr_u_min = [-v_target; -0.3];
         
+        % Preparazione input MPC
         delta_theta = x_current(3) - desired_theta;
         delta_theta_norm = atan2(sin(delta_theta), cos(delta_theta));
         
@@ -117,28 +109,39 @@ while counter < TOTAL_SAMPLES
         Y_ref_Long = reshape(repmat(current_y_ref, 1, N), [], 1);
         
         % ------------------------------------------------------------
-        % SEZIONE DATA AUGMENTATION (Il "trucco" richiesto)
+        % SEZIONE DATA AUGMENTATION (CORRETTA E DINAMICA)
         % ------------------------------------------------------------
-        
-        % Generiamo una lista di u_prev candidati
-        % Include sempre il caso REALE (u_prev_real) + N_aug varianti random
         
         u_prev_candidates = zeros(N_aug + 1, 2);
         
         % 1. Caso Reale (deve esserci sempre per la coerenza fisica)
         u_prev_candidates(1, :) = u_prev_real'; 
         
-        % 2. Varianti Casuali (Data Augmentation)
-        % Generiamo N_aug valori casuali tra i min e max definiti in alto
-        rand_v = v_aug_min + (v_aug_max - v_aug_min) * rand(N_aug, 1);
+        % 2. Varianti Casuali (Data Augmentation DINAMICA)
+        % Calcoliamo un limite massimo per u_prev che sia fisicamente 
+        % compatibile con la frenata richiesta.
+        % Se v_target è basso, non possiamo generare una u_prev altissima,
+        % altrimenti l'MPC fallisce (Infeasible).
+        
+        overshoot_margin = 0.9; % Permettiamo di essere un po' più veloci del target (per imparare a frenare)
+        local_v_max = v_target + overshoot_margin;
+        
+        % Saturiamo comunque ai limiti globali del motore (es. 3.0 m/s)
+        local_v_max = min(local_v_max, 3.0);
+        local_v_min = -0.5; % Un po' di retromarcia è sempre ok
+        
+        % Generazione casuale nel range FATTIBILE
+        rand_v = local_v_min + (local_v_max - local_v_min) * rand(N_aug, 1);
+        
+        % Per lo sterzo (w) usiamo il range standard
         rand_w = w_aug_min + (w_aug_max - w_aug_min) * rand(N_aug, 1);
         
         u_prev_candidates(2:end, :) = [rand_v, rand_w];
         
-        % Variabile per salvare l'output del caso reale (serve per muovere l'auto)
+        % Variabile per salvare l'output del caso reale
         u_opt_real_step = [0;0];
         
-        % Loop su tutte le varianti (Reale + Immaginarie)
+        % Loop su tutte le varianti
         for k = 1:size(u_prev_candidates, 1)
             
             if counter >= TOTAL_SAMPLES, break; end
@@ -150,14 +153,13 @@ while counter < TOTAL_SAMPLES
                 [u_opt, ~] = MPC_Linear(x_mpc_input, u_prev_test, Y_ref_Long, N, Ts, L, Q, R, ...
                     curr_u_min, curr_u_max, du_min, du_max, C);
             catch
-                u_opt = [0;0];
+                % Se fallisce ancora (raro ora), mettiamo un valore sicuro
+                u_opt = [0;0]; 
             end
             
             % SALVATAGGIO NEL DATASET
             counter = counter + 1;
-            % Input: Stato Fisico + u_prev (che può essere reale o inventato)
             X_dataset(counter, :) = [x_current', u_prev_test'];
-            % Output: La decisione dell'MPC per quella specifica combinazione
             Y_dataset(counter, :) = u_opt';
             
             % Se era il caso reale (indice 1), salviamolo per la fisica
@@ -170,15 +172,12 @@ while counter < TOTAL_SAMPLES
         % FINE AUGMENTATION - AVANZAMENTO FISICO
         % ------------------------------------------------------------
         
-        % Muoviamo l'auto SOLO usando il risultato del caso reale (k=1)
         dxdt = Car_Like_Model(x_current, u_opt_real_step, L);
         x_next = x_current + dxdt * Ts;
         
-        % Aggiornamento stato reale
         x_current = x_next;
         u_prev_real = u_opt_real_step;
         
-        % Controllo arrivo al target (per terminare episodio)
         if dist < TOLERANCE_POS && norm(u_prev_real) < 0.1
             break; 
         end
@@ -190,10 +189,9 @@ while counter < TOTAL_SAMPLES
 end
 
 %% RIDUZIONE E SALVATAGGIO
-% Tagliamo le righe vuote se abbiamo sforato di poco il loop o interrotto
 X_dataset = X_dataset(1:counter, :);
 Y_dataset = Y_dataset(1:counter, :);
 
 fprintf('Salvataggio su file: %s ...\n', OUTPUT_FILE);
 save(OUTPUT_FILE, 'X_dataset', 'Y_dataset', 'L', 'Ts', 'N');
-fprintf('COMPLETATO! Ora puoi addestrare la rete con questi dati.\n');
+fprintf('COMPLETATO! Ora addestra la rete con questi nuovi dati puliti.\n');
