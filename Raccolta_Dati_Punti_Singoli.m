@@ -1,95 +1,116 @@
-%% RACCOLTA DATI RECOVERY (Punti Singoli Coerenti)
-% Genera situazioni difficili (Recovery) usando la logica del tuo script.
+%% RACCOLTA DATI RECOVERY (Punti Singoli) - STANDARDIZED
+% FIX: Rimossa incoerenza limiti (es. 0.3 vs 0.35).
 
 clear all; clc; close all;
 
-%% PARAMETRI (Coerenti)
+%% PARAMETRI
 L = 1.2; Ts = 0.1; N = 40;
-TOTAL_SAMPLES = 20000;
-OUTPUT_FILE = 'Dataset_Recovery_SinglePoints.mat';
 
-% VINCOLI E PESI
-u_min = [-2.0; -0.3]; u_max = [ 2.0;  0.3]; % Sterzo max 0.3
-du_min = [-0.5; -0.1]; du_max = [ 0.5;  0.1];
+TARGET_SCENARIOS = 10000; 
+N_aug = 5;                
+OUTPUT_FILE = 'Dataset_Recovery_Augmented.mat';
+
+%% --- PARAMETRI FISICI (DEVONO MATCHARE L'ALTRO SCRIPT) ---
+V_MAX_SYS = 3.0;   
+W_MAX_SYS = 0.35;  
+
+V_CRUISE  = 2.0;   
+V_REVERSE = -0.5;
+
+ACC_MAX = 1.0;
+ACC_MIN = -1.0; 
+D_STEER_MAX = 0.2;
+
+% Limiti Assoluti per Data Augmentation
+u_min = [V_REVERSE; -W_MAX_SYS]; 
+u_max = [V_MAX_SYS;  W_MAX_SYS]; 
+
+du_min = [ACC_MIN; -D_STEER_MAX]; 
+du_max = [ACC_MAX;  D_STEER_MAX];
+
 C = eye(4);
-Q = diag([5, 5, 50, 0]);   % Theta (50) pesa 10 volte la Posizione (5)
-R = diag([1, 100]);        % Sterzare (100) costa tantissimo -> Guida dolce
-RAMP_DIST = 3.0;
+Q = diag([5, 5, 50, 0]);   
+R = diag([1, 100]); 
+RAMP_DIST = 1.5; 
 
 %% INIZIALIZZAZIONE
-X_dataset = zeros(TOTAL_SAMPLES, 6);
-Y_dataset = zeros(TOTAL_SAMPLES, 2);
+ESTIMATED_ROWS = TARGET_SCENARIOS * N_aug;
+X_dataset = zeros(ESTIMATED_ROWS, 6);
+Y_dataset = zeros(ESTIMATED_ROWS, 2);
 
-fprintf('Avvio Raccolta Dati RECOVERY...\n');
+fprintf('Avvio Raccolta RECOVERY (Standardized)...\n');
 
-for i = 1:TOTAL_SAMPLES
+counter_rows = 0;
+counter_scenarios = 0;
 
-    %  STATO CASUALE
+while counter_scenarios < TARGET_SCENARIOS
+    
+    % Generazione casuale (uguale a prima)
     dist_rand = 0.5 + 19.5 * rand();
-    angle_rand = -pi + 2*pi * rand();
-
-    x_val = dist_rand * cos(angle_rand);
-    y_val = dist_rand * sin(angle_rand);
-
-    % Orientamento anche contromano
-    theta_val = -pi + 2*pi * rand();
-    phi_val = -0.3 + 0.6 * rand(); % Sterzo entro +/- 0.3
-
-    % U_PREV COERENTE (Fisica inversa)
-    if dist_rand > RAMP_DIST
-        v_base = 2.0;
-    else
-        v_base = 0.3 + (2.0 - 0.3)*(dist_rand/RAMP_DIST);
-    end
-    v_prev_gen = v_base + (rand()-0.5)*1.0;
-
-    % Sterzo precedente coerente
-    w_prev_gen = (rand()-0.5) * 0.1;
-
-    % Saturazione
-    v_prev_gen = max(min(v_prev_gen, u_max(1)), u_min(1));
-    w_prev_gen = max(min(w_prev_gen, u_max(2)), u_min(2));
-
-    u_prev_sim = [v_prev_gen; w_prev_gen];
+    angle_to_target_rel = -pi + 2*pi * rand(); 
+    x_val = -dist_rand * cos(angle_to_target_rel);
+    y_val = -dist_rand * sin(angle_to_target_rel);
+    theta_val = -pi + 2*pi * rand(); 
+    phi_val = -W_MAX_SYS + (2*W_MAX_SYS) * rand(); % Sterzo random nei limiti corretti
+    
     x_current = [x_val; y_val; theta_val; phi_val];
 
-    % LOGICA PLANNER (La tua logica applicata istantaneamente)
     dist = norm([x_val; y_val]);
     dx_t = -x_val; dy_t = -y_val;
+    desired_theta = atan2(dy_t, dx_t);
+    
+    heading_err = desired_theta - theta_val;
+    heading_err = atan2(sin(heading_err), cos(heading_err));
+    
+    % Logica Velocità Coerente
+    if abs(heading_err) > pi/2
+        v_target_planner = 0.5;
+    elseif dist > RAMP_DIST
+        v_target_planner = V_CRUISE; % Usa variabile
+    else
+        v_target_planner = 0.3 + (V_CRUISE - 0.3)*(dist/RAMP_DIST);
+    end
 
-    if dist > 1.0, desired_theta = atan2(dy_t, dx_t);
-    else, desired_theta = theta_val; end
-
-    if dist > RAMP_DIST, v_target = 2.0;
-    else, v_target = 0.3 + (2.0 - 0.3)*(dist/RAMP_DIST); end
-
-    % Vincoli dinamici corretti
-    curr_u_max = [v_target; 0.3];
-    curr_u_min = [-v_target; -0.3];
-
-    % Angle Wrapping
     delta_theta = theta_val - desired_theta;
     delta_theta_norm = atan2(sin(delta_theta), cos(delta_theta));
     x_mpc_input = x_current;
     x_mpc_input(3) = desired_theta + delta_theta_norm;
 
-    % Riferimento
     current_y_ref = [0; 0; desired_theta; 0];
     Y_ref_Long = reshape(repmat(current_y_ref, 1, N), [], 1);
-
-    % MPC
-    try
-        [u_opt, ~] = MPC_Linear(x_mpc_input, u_prev_sim, Y_ref_Long, N, Ts, L, Q, R, ...
-            curr_u_min, curr_u_max, du_min, du_max, C);
-    catch
-        u_opt = [0;0];
+    
+    for k = 1:N_aug
+        
+        v_rand_min = V_REVERSE;
+        % Max possibile per augmentation (overshoot permesso ma saturato a V_MAX_SYS)
+        v_rand_max = min(v_target_planner + 0.5, V_MAX_SYS);
+        
+        rand_v = v_rand_min + (v_rand_max - v_rand_min) * rand();
+        rand_w = -W_MAX_SYS + (2*W_MAX_SYS) * rand(); % Random sterzo completo
+        u_prev_test = [rand_v; rand_w];
+        
+        curr_u_max = [v_target_planner;  W_MAX_SYS];
+        curr_u_min = [-v_target_planner; -W_MAX_SYS];
+        
+        try
+            [u_opt, ~] = MPC_Linear(x_mpc_input, u_prev_test, Y_ref_Long, N, Ts, L, Q, R, ...
+                curr_u_min, curr_u_max, du_min, du_max, C);
+        catch
+            u_opt = [0;0];
+        end
+        
+        counter_rows = counter_rows + 1;
+        X_dataset(counter_rows, :) = [x_val, y_val, theta_val, phi_val, u_prev_test(1), u_prev_test(2)];
+        Y_dataset(counter_rows, :) = u_opt';
     end
-
-    X_dataset(i, :) = [x_val, y_val, theta_val, phi_val, u_prev_sim(1), u_prev_sim(2)];
-    Y_dataset(i, :) = u_opt';
-
-    if mod(i, 5000) == 0, fprintf('Generati %d/%d...\n', i, TOTAL_SAMPLES); end
+    
+    counter_scenarios = counter_scenarios + 1;
+    if mod(counter_scenarios, 2000) == 0
+        fprintf('Scenari: %d...\n', counter_scenarios);
+    end
 end
 
+X_dataset = X_dataset(1:counter_rows, :);
+Y_dataset = Y_dataset(1:counter_rows, :);
 save(OUTPUT_FILE, 'X_dataset', 'Y_dataset', 'L', 'Ts', 'N');
-fprintf('Dataset RECOVERY salvato.\n');
+fprintf('DATASET RECOVERY COMPLETATO.\n');
