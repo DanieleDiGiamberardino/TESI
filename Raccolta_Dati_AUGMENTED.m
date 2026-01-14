@@ -86,7 +86,7 @@ while counter_steps < TARGET_PHYSICAL_STEPS
             desired_theta = final_approach_angle;
         end
         
-        % --- PLANNER VELOCITÀ (NO HARDCODING) ---
+        % --- PLANNER VELOCITÀ  ---
         if dist > RAMP_DIST
             v_target_curr = V_CRUISE; % Usa la variabile, non 2.0
         else
@@ -94,9 +94,9 @@ while counter_steps < TARGET_PHYSICAL_STEPS
         end
         
         % Vincoli Dinamici Locali per MPC
-        % Qui usiamo W_MAX_SYS invece di 0.3 fisso
-        curr_u_max = [ v_target_curr;  W_MAX_SYS];
-        curr_u_min = [-v_target_curr; -W_MAX_SYS];
+
+        curr_u_max = [ V_MAX_SYS;  W_MAX_SYS];
+        curr_u_min = [-0.5; -W_MAX_SYS];
         
         % Input MPC
         delta_theta = x_current(3) - desired_theta;

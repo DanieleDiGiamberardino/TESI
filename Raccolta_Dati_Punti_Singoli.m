@@ -45,7 +45,7 @@ counter_scenarios = 0;
 
 while counter_scenarios < TARGET_SCENARIOS
     
-    % Generazione casuale (uguale a prima)
+    % Generazione casuale 
     dist_rand = 0.5 + 19.5 * rand();
     angle_to_target_rel = -pi + 2*pi * rand(); 
     x_val = -dist_rand * cos(angle_to_target_rel);
@@ -88,9 +88,9 @@ while counter_scenarios < TARGET_SCENARIOS
         rand_v = v_rand_min + (v_rand_max - v_rand_min) * rand();
         rand_w = -W_MAX_SYS + (2*W_MAX_SYS) * rand(); % Random sterzo completo
         u_prev_test = [rand_v; rand_w];
-        
-        curr_u_max = [v_target_planner;  W_MAX_SYS];
-        curr_u_min = [-v_target_planner; -W_MAX_SYS];
+        %% CHECK
+        curr_u_max = [V_MAX_SYS;  W_MAX_SYS];%!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        curr_u_min = [-0.5; -W_MAX_SYS];
         
         try
             [u_opt, ~] = MPC_Linear(x_mpc_input, u_prev_test, Y_ref_Long, N, Ts, L, Q, R, ...
